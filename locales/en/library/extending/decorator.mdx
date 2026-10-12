@@ -165,12 +165,27 @@ Example structure:
   "fullpath": "/path",
   "query": "key=value",
   "qsd": {"key": "value"},
+  "verify": True,
   "asset": AppriseAsset(),
   "tag": set(),
 }
 ```
 
-Only fields present in the URL are included. At minimum, `schema`, `url`, `asset`, and `tag` are always present.
+Only fields present in the URL are included. At minimum, `schema`, `url`, `verify`, `asset`, and `tag` are always present.
+
+The common URL options work the same way they do for any other service, and their values also appear in `meta`. This includes `user=`, `pass=`, `verify=`, `redirect=`, `rto=`, `cto=`, `format=`, `overflow=`, `emojis=`, `tz=`, `store=`, `retry=`, `wait=`, and `optional=`. For example, `foobar://host?retry=2` calls your function up to three times while it keeps returning `False`. The decorator gets the same `meta` whether the URL is added directly, loaded from a TEXT configuration, or loaded from a YAML configuration.
+
+In a YAML configuration, any settings written under the URL also appear in `meta`, and so do [template variables](../../getting-started/template/) once they are supplied:
+
+```yaml
+template:
+  - host
+urls:
+  - foobar://${HOST}/?key=value:
+      custom: abc
+```
+
+Here `meta["custom"]` is `"abc"`, and `meta["host"]` is whatever value was given for `host`.
 
 ## Complex Declarations
 

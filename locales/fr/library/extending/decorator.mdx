@@ -168,12 +168,27 @@ Exemple de structure :
   "fullpath": "/path",
   "query": "key=value",
   "qsd": {"key": "value"},
+  "verify": True,
   "asset": AppriseAsset(),
   "tag": set(),
 }
 ```
 
-Seuls les champs présents dans l'URL sont inclus. Au minimum, `schema`, `url`, `asset` et `tag` sont toujours présents.
+Seuls les champs présents dans l'URL sont inclus. Au minimum, `schema`, `url`, `verify`, `asset` et `tag` sont toujours présents.
+
+Les options d'URL courantes fonctionnent de la même façon que pour tout autre service, et leurs valeurs apparaissent aussi dans `meta`. Cela comprend `user=`, `pass=`, `verify=`, `redirect=`, `rto=`, `cto=`, `format=`, `overflow=`, `emojis=`, `tz=`, `store=`, `retry=`, `wait=` et `optional=`. Par exemple, `foobar://host?retry=2` appelle votre fonction jusqu'à trois fois tant qu'elle renvoie `False`. Le décorateur reçoit le même `meta`, que l'URL soit ajoutée directement, chargée depuis une configuration TEXT ou chargée depuis une configuration YAML.
+
+Dans une configuration YAML, les paramètres écrits sous l'URL apparaissent aussi dans `meta`, tout comme les [variables de substitution](../../getting-started/template/) une fois fournies :
+
+```yaml
+template:
+  - host
+urls:
+  - foobar://${HOST}/?key=value:
+      custom: abc
+```
+
+Ici, `meta["custom"]` vaut `"abc"` et `meta["host"]` reçoit la valeur fournie pour `host`.
 
 ## Déclarations Complexes
 
