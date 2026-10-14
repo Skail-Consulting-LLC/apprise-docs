@@ -726,6 +726,8 @@ Notes:
 
 - Both methods do nothing when `retry=0`, which is the default.
 - Each piece of a split message is tracked on its own.
+- A piece that `send()` returned `True` for is not sent again on a retry.
+  Your own tracking only decides who receives a piece that partly failed.
 - Tracking is dropped when the notification finishes.
 - Something sent once for the whole notification, such as an image, uses
   `per_message=True` so it is not repeated for every piece:

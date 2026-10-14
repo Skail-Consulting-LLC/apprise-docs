@@ -754,6 +754,9 @@ Remarques :
 
 - Les deux méthodes ne font rien lorsque `retry=0`, la valeur par défaut.
 - Chaque partie d'un message découpé est suivie séparément.
+- Une partie pour laquelle `send()` a renvoyé `True` n'est pas renvoyée lors
+  d'une nouvelle tentative. Votre propre suivi sert uniquement à choisir qui
+  reçoit une partie qui a partiellement échoué.
 - Le suivi est supprimé à la fin de la notification.
 - Un élément envoyé une seule fois pour toute la notification, comme une
   image, utilise `per_message=True` afin de ne pas être répété pour chaque
