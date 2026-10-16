@@ -55,8 +55,8 @@ Envoyez des notifications sans utiliser de stockage persistant.
 
 **Paramètres de charge utile :**
 
-- `urls` : obligatoire. Une ou plusieurs URL de destination.
-- `body` : obligatoire. Corps du message.
+- `urls` : facultatif. Une ou plusieurs URL de destination. S'il est omis, une requête avec un en-tête `X-Apprise-Config-ID` envoie plutôt via cette configuration enregistrée (seulement ses URL sans tag, sauf si un tag est fourni). Sinon, `APPRISE_STATELESS_URLS` est utilisé.
+- `body` : corps du message. Obligatoire, sauf si une pièce jointe est envoyée.
 - `title` : facultatif. Titre du message.
 - `type` : facultatif. Type de message : `info` (par défaut), `success`, `warning`, `failure`.
 - `format` : facultatif. Format d'entrée : `text`, `markdown` ou `html`. S'il est complètement omis, la conversion automatique est ignorée, sauf si le serveur définit `APPRISE_DEFAULT_FORMAT`. Une valeur vide ou `null` force aussi le mode pass-through, même avec cette valeur par défaut. Les limites, la gestion du dépassement et l'emballage sûr pour le service s'appliquent toujours.
@@ -69,6 +69,35 @@ Lorsque l'authentification est activée, un administrateur peut appeler `/notify
 Avec `Content-Type: application/json`, la charge utile doit être un objet JSON.
 Les autres racines JSON valides, comme les tableaux, chaînes, nombres, booléens
 et `null`, sont rejetées avec le code HTTP `400`.
+
+### Formats de requête
+
+`/notify/` et `/notify/{KEY}` lisent le corps de la requête selon son `Content-Type` :
+
+| Content-Type                        | Lecture du corps                                                       |
+| :---------------------------------- | :--------------------------------------------------------------------- |
+| `application/json`                  | Un objet JSON contenant les paramètres de charge utile ci-dessus       |
+| `application/x-www-form-urlencoded` | Des champs de formulaire portant les mêmes noms                        |
+| `multipart/form-data`               | Des champs de formulaire, plus des fichiers téléversés dans `attach`   |
+| `text/plain`                        | Le corps complet est le message, envoyé comme texte                    |
+| `text/html`                         | Le corps complet est le message, envoyé en HTML                        |
+| `text/markdown`                     | Le corps complet est le message, envoyé en Markdown                    |
+| Tout autre type, ou aucun           | Lu comme des champs de formulaire, comme dans les versions précédentes |
+
+Un corps en texte brut est décodé avec le `charset` de son `Content-Type` (UTF-8 par défaut). `?format=` remplace le format défini par son `Content-Type`. Le mapping de la charge utile (`?:champ=`) ne s'applique pas à un corps en texte brut.
+
+### En-têtes de notification
+
+Ces en-têtes fonctionnent avec tous les formats de requête pris en charge sur les deux points de terminaison de notification :
+
+| En-tête              | Définit                                                               | Exemple                |
+| :------------------- | :-------------------------------------------------------------------- | :--------------------- |
+| `X-Apprise-Title`    | Le titre                                                              | `État du déploiement`  |
+| `X-Apprise-Type`     | Le type                                                               | `success`              |
+| `X-Apprise-Tag`      | L'expression de tags                                                  | `devops, admin`        |
+| `X-Apprise-Template` | Les valeurs de substitution, en paires `nom=valeur` encodées pour URL | `api_key=abc&room=ops` |
+
+Un en-tête n'est utilisé que si la charge utile omet ce champ, et il l'emporte sur la chaîne de requête. Consultez [Priorité des champs](/api/usage/#priorité-des-champs) pour l'ordre complet, et [Exemples](/api/usage/#exemples) pour chaque méthode d'envoi.
 
 ## Pièces Jointes
 
@@ -89,13 +118,13 @@ La résolution du nom de fichier suit cet ordre de priorité :
 3. Repli : `attachment.001`, `attachment.002`, ... lorsqu'aucun nom ne peut être déterminé.
 
 ```text
-# Nom résolu depuis le chemin de l'URL : photo.jpg
+# Enregistré sous photo.jpg (pris dans le chemin de l'URL)
 https://example.com/images/photo.jpg
 
-# Nom résolu depuis le chemin de l'URL : abc123
+# Enregistré sous abc123 (pris dans le chemin de l'URL)
 https://example.com/thumbnails/abc123
 
-# Nom imposé via ?name= : thumbnail.jpg
+# Enregistré sous thumbnail.jpg (imposé par ?name=)
 https://example.com/thumbnails/abc123?name=thumbnail.jpg
 ```
 
@@ -124,7 +153,7 @@ Tous les points de terminaison de cette section sont indisponibles avec `APPRISE
 | `/del/{KEY}`       | `POST`   | Supprime une configuration, de deux façons. Appelé par un administrateur, il supprime le contenu et l'identifiant de la configuration. Appelé avec l'identifiant propre à la configuration, il vide seulement le contenu et conserve l'identifiant.                                                                                                                                                                                             |
 | `/move/{KEY}`      | `POST`   | Déplace une configuration vers un nouvel ID. Charge utile : `to` (obligatoire).                                                                                                                                                                                                                                                                                                                                                                 |
 | `/get/{KEY}`       | `POST`   | Renvoie une configuration. Alias : `/cfg/{KEY}`.                                                                                                                                                                                                                                                                                                                                                                                                |
-| `/notify/{KEY}`    | `POST`   | Envoie avec la configuration enregistrée. Accepte un objet `template` facultatif (ou des champs de formulaire `template[nom]`) pour les configurations utilisant `${NOM}`. `locked` et `public` exigent un tag précis ; `disabled` est réservé à l'administrateur.                                                                                                                                                                              |
+| `/notify/{KEY}`    | `POST`   | Envoie avec la configuration enregistrée. Accepte les mêmes [formats de requête](#formats-de-requête) et [en-têtes](#en-têtes-de-notification) que `/notify/`, ainsi qu'un objet `template` facultatif (ou des champs de formulaire `template[nom]`) pour les configurations utilisant `${NOM}`. `locked` et `public` exigent un tag précis ; `disabled` est réservé à l'administrateur.                                                        |
 | `/json/urls/{KEY}` | `GET`    | Renvoie les URL et les tags enregistrés. Chaque URL indique ses noms de substitution. Avec `privacy=0`, chaque nom porte sa valeur par défaut (ou `null`). Avec `privacy=1`, les secrets des URL sont masqués et chaque nom vaut `null`. Les valeurs de l'environnement du serveur ne sont jamais renvoyées. Avec `APPRISE_CONFIG_LOCK=yes`, les identifiants de l'administrateur global sont requis et chaque nom de substitution vaut `null`. |
 | `/status/{KEY}`    | `GET`    | Renvoie l'état après authentification. `config_lock` indique si cet appelant peut consulter le contenu de la configuration.                                                                                                                                                                                                                                                                                                                     |
 | `/qr/{KEY}`        | `GET`    | Renvoie l'URL `apprise://` ou `apprises://`, sans mot de passe, pour ajouter la configuration à Apprise Mobile.                                                                                                                                                                                                                                                                                                                                 |

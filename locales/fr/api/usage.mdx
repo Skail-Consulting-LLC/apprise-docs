@@ -5,6 +5,8 @@ sidebar:
   order: 3
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 <style>{`
   /* Existing styling to ensure block behavior */
   .theme-aware-sf-diagram img,
@@ -34,6 +36,396 @@ Ce guide couvre la fonctionnalité centrale de l'API Apprise : l'envoi de notifi
 
 1. **Sans état :** vous fournissez les URL de configuration dans la charge utile de la requête.
 1. **Avec état :** vous référencez une clé de configuration préalablement enregistrée.
+
+## Référence rapide
+
+Chaque méthode d'envoi ci-dessous fonctionne avec les deux points de terminaison. Les requêtes sans état vont vers `/notify` ; les requêtes avec état vont vers `/notify/{KEY}`, ou vers `/notify` avec un en-tête `X-Apprise-Config-ID`.
+
+| Méthode                 | Sans état (`/notify`)                                             | Avec état (`/notify/{KEY}`)                         |
+| ----------------------- | ----------------------------------------------------------------- | --------------------------------------------------- |
+| Corps seul              | `{"body": "..."}` envoie vers `APPRISE_STATELESS_URLS`            | `{"body": "..."}` envoie vers les URL sans tag      |
+| Formulaire              | `body=...&title=...`                                              | `body=...&tag=devops`                               |
+| Texte brut              | `Content-Type: text/plain`, le corps de la requête est le message | Idem, par le chemin ou avec `X-Apprise-Config-ID`   |
+| HTML / Markdown         | `Content-Type: text/html` ou `text/markdown`                      | Idem                                                |
+| En-têtes                | `X-Apprise-Title`, `X-Apprise-Type`                               | Aussi `X-Apprise-Tag` et `X-Apprise-Template`       |
+| Chaîne de requête       | `?title=...&type=...&format=...`                                  | Aussi `?tag=...`                                    |
+| Pièces jointes          | `-F attach=@fichier`, avec ou sans corps                          | Idem                                                |
+| Valeurs de substitution | Non utilisées                                                     | Objet `template`, champs `template[nom]` ou en-tête |
+| URL explicites          | `urls` dans une charge utile JSON ou de formulaire                | Non utilisées                                       |
+
+## Priorité des champs
+
+Un champ peut être envoyé dans la charge utile, dans un en-tête `X-Apprise-*` ou dans la chaîne de requête. Lorsqu'il est envoyé à plusieurs endroits, la première source de ce tableau l'emporte, de gauche à droite :
+
+| Champ      | Charge utile                                                                              | En-tête                                                           | Chaîne de requête      | Si rien n'est envoyé                                                                                        |
+| ---------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `body`     | `body`, ou le corps complet de la requête pour `text/plain`, `text/html`, `text/markdown` | —                                                                 | —                      | Obligatoire, sauf si une pièce jointe est envoyée                                                           |
+| `title`    | `title`                                                                                   | `X-Apprise-Title`                                                 | `?title=`              | Aucun titre                                                                                                 |
+| `type`     | `type`                                                                                    | `X-Apprise-Type`                                                  | `?type=`               | `info`                                                                                                      |
+| `tag`      | `tag`, puis `tags`                                                                        | `X-Apprise-Tag`                                                   | `?tag=`, puis `?tags=` | Avec état : seulement les URL sans tag. Sans état : toutes les URL                                          |
+| `format`   | `format`                                                                                  | —                                                                 | `?format=`             | Texte brut : défini par son `Content-Type`. JSON : `APPRISE_DEFAULT_FORMAT`. Formulaire : aucune conversion |
+| `template` | Objet `template`, ou champs de formulaire `template[nom]`                                 | `X-Apprise-Template`                                              | —                      | Chaque nom utilise la valeur par défaut de la configuration, puis `APPRISE_TEMPLATE_<NOM>`                  |
+| `urls`     | `urls` (sans état uniquement)                                                             | `X-Apprise-Config-ID` utilise plutôt la configuration enregistrée | —                      | `APPRISE_STATELESS_URLS`, pour un administrateur uniquement si l'authentification est activée               |
+
+- Un `title`, un `type` ou un `tag` vide compte comme non envoyé ; la source suivante est donc utilisée.
+- Les valeurs définies par le [mapping de la charge utile](#mapping-de-la-charge-utile-hooks) (`?:champ=`) comptent comme des valeurs de la charge utile.
+- Les sources de `template` ne se combinent pas : des valeurs non vides dans la charge utile remplacent entièrement l'en-tête. Si la charge utile ne contient aucune valeur utilisable, l'en-tête peut les fournir.
+- Ces valeurs ne changent jamais qui peut envoyer. L'authentification et les règles de tag des configurations `locked` et `public` s'appliquent quelle que soit la provenance d'une valeur.
+
+## Messages en texte brut et en-têtes
+
+Les clients qui ne peuvent pas construire de JSON peuvent envoyer le message comme corps complet de la requête. Le `Content-Type` en définit le format :
+
+| Content-Type    | Le corps est envoyé comme |
+| --------------- | ------------------------- |
+| `text/plain`    | Texte                     |
+| `text/html`     | HTML                      |
+| `text/markdown` | Markdown                  |
+
+Ajoutez `?format=` pour utiliser un autre format. Les requêtes avec tout autre `Content-Type`, ou sans aucun, fonctionnent comme avant.
+
+```bash
+# Notifier les URL sans tag enregistrées sous 'my-alerts'
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "Déploiement terminé" \
+  http://localhost:8000/notify/my-alerts
+
+# Sans état : envoie vers APPRISE_STATELESS_URLS du serveur
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "Déploiement terminé" \
+  http://localhost:8000/notify
+```
+
+Le reste du message peut passer par des en-têtes. Ces en-têtes fonctionnent avec chaque format de requête pris en charge, y compris JSON et les formulaires :
+
+| En-tête              | Définit                                                                                         |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| `X-Apprise-Title`    | Le titre                                                                                        |
+| `X-Apprise-Type`     | Le type : `info`, `success`, `warning` ou `failure`                                             |
+| `X-Apprise-Tag`      | L'[expression de tags](#tags)                                                                   |
+| `X-Apprise-Template` | Les [valeurs de substitution](#fournir-des-valeurs-de-substitution) en paires encodées pour URL |
+
+```http
+POST /notify/my-alerts HTTP/1.1
+Content-Type: text/plain
+X-Apprise-Title: État du déploiement
+X-Apprise-Type: success
+X-Apprise-Tag: devops
+
+Déploiement terminé avec succès
+```
+
+Lorsqu'un champ est envoyé à plusieurs endroits, consultez [Priorité des champs](#priorité-des-champs) pour savoir lequel l'emporte. Les onglets ci-dessous proposent des exemples prêts à copier pour les requêtes avec corps seul, formulaire, JSON, chaîne de requête, en-têtes, pièces jointes et valeurs de substitution, dans les modes avec et sans état.
+
+## Exemples
+
+Chaque onglet montre une méthode d'envoi. Pour les mêmes requêtes en Python, Go, Java et d'autres langages, consultez [Intégrations](../integrations/#exemples).
+
+<Tabs syncKey="apprise-api-notify-mode">
+<TabItem label="Sans état">
+
+Les exemples sans `urls` envoient vers `APPRISE_STATELESS_URLS` du serveur.
+
+<Tabs syncKey="apprise-api-notify-method">
+<TabItem label="Corps seul">
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"body": "Sauvegarde terminée"}' \
+  http://localhost:8000/notify
+```
+
+Le titre est vide et le type est `info`.
+
+</TabItem>
+<TabItem label="Formulaire">
+
+```bash
+curl -X POST \
+  -d "title=Sauvegarde nocturne" \
+  -d "body=Sauvegarde terminée" \
+  http://localhost:8000/notify
+```
+
+</TabItem>
+<TabItem label="Texte brut">
+
+```bash
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "Sauvegarde terminée" \
+  http://localhost:8000/notify
+```
+
+Le corps complet de la requête est le message. Aucun encodage JSON ou de formulaire n'est nécessaire.
+
+</TabItem>
+<TabItem label="HTML / Markdown">
+
+```bash
+# Envoyé en Markdown
+curl -X POST \
+  -H "Content-Type: text/markdown" \
+  --data-raw "**Sauvegarde** terminée" \
+  http://localhost:8000/notify
+
+# Envoyé en HTML
+curl -X POST \
+  -H "Content-Type: text/html" \
+  --data-raw "<b>Sauvegarde</b> terminée" \
+  http://localhost:8000/notify
+
+# Un corps text/plain lu comme du Markdown
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "**Sauvegarde** terminée" \
+  "http://localhost:8000/notify?format=markdown"
+```
+
+</TabItem>
+<TabItem label="En-têtes">
+
+```bash
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  -H "X-Apprise-Title: Sauvegarde nocturne" \
+  -H "X-Apprise-Type: success" \
+  --data-raw "Sauvegarde terminée" \
+  http://localhost:8000/notify
+```
+
+</TabItem>
+<TabItem label="Chaîne de requête">
+
+```bash
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "Disque presque plein" \
+  "http://localhost:8000/notify?title=Stockage&type=warning"
+```
+
+</TabItem>
+<TabItem label="Combinaison">
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Apprise-Title: Titre de l'en-tête" \
+  -H "X-Apprise-Type: warning" \
+  -d '{"body": "Disque presque plein", "title": "Stockage"}' \
+  "http://localhost:8000/notify?type=failure"
+```
+
+Le titre est `Stockage`, car la charge utile l'emporte sur l'en-tête. Le type est `warning`, car l'en-tête l'emporte sur la chaîne de requête.
+
+</TabItem>
+<TabItem label="Pièces jointes">
+
+```bash
+# Téléverser un fichier local
+curl -X POST \
+  -F "body=Voir le journal joint" \
+  -F "attach=@/var/log/syslog" \
+  http://localhost:8000/notify
+
+# Une pièce jointe seule suffit ; le corps est facultatif
+curl -X POST \
+  -F "attach=@/path/to/snapshot.jpg" \
+  http://localhost:8000/notify
+
+# Faire télécharger un fichier distant par le serveur
+curl -X POST \
+  -F "body=Capture de la caméra de sécurité" \
+  -F "attach=http://camera.local/snapshot.jpg" \
+  http://localhost:8000/notify
+```
+
+</TabItem>
+<TabItem label="URL explicites">
+
+```bash
+# JSON
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "urls": ["discord://webhook_id/webhook_token", "mailto://user:pass@gmail.com"],
+    "body": "Sauvegarde terminée"
+  }' \
+  http://localhost:8000/notify
+
+# Formulaire
+curl -X POST \
+  -d "urls=mailto://user:pass@gmail.com" \
+  -d "body=Sauvegarde terminée" \
+  http://localhost:8000/notify
+```
+
+`urls` remplace `APPRISE_STATELESS_URLS` pour cette requête. Une requête en texte brut ne peut pas transmettre `urls`.
+
+</TabItem>
+</Tabs>
+
+</TabItem>
+<TabItem label="Avec état">
+
+Ces exemples envoient via une configuration enregistrée sous la clé `my-alerts`.
+
+<Tabs syncKey="apprise-api-notify-method">
+<TabItem label="Corps seul">
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"body": "Sauvegarde terminée"}' \
+  http://localhost:8000/notify/my-alerts
+```
+
+Sans tag, seules les URL qui n'ont aucun tag sont notifiées, comme avec la CLI d'Apprise.
+
+</TabItem>
+<TabItem label="Formulaire">
+
+```bash
+curl -X POST \
+  -d "tag=devops" \
+  -d "body=Sauvegarde terminée" \
+  http://localhost:8000/notify/my-alerts
+```
+
+</TabItem>
+<TabItem label="Texte brut">
+
+```bash
+# La clé dans le chemin
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "Sauvegarde terminée" \
+  http://localhost:8000/notify/my-alerts
+
+# La clé dans un en-tête, hors de l'URL
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  -H "X-Apprise-Config-ID: my-alerts" \
+  --data-raw "Sauvegarde terminée" \
+  http://localhost:8000/notify
+```
+
+</TabItem>
+<TabItem label="HTML / Markdown">
+
+```bash
+# Envoyé en Markdown
+curl -X POST \
+  -H "Content-Type: text/markdown" \
+  --data-raw "**Sauvegarde** terminée" \
+  http://localhost:8000/notify/my-alerts
+
+# Envoyé en HTML
+curl -X POST \
+  -H "Content-Type: text/html" \
+  --data-raw "<b>Sauvegarde</b> terminée" \
+  http://localhost:8000/notify/my-alerts
+```
+
+</TabItem>
+<TabItem label="En-têtes">
+
+```bash
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  -H "X-Apprise-Title: État du déploiement" \
+  -H "X-Apprise-Type: success" \
+  -H "X-Apprise-Tag: devops" \
+  --data-raw "Déploiement terminé avec succès" \
+  http://localhost:8000/notify/my-alerts
+```
+
+</TabItem>
+<TabItem label="Chaîne de requête">
+
+```bash
+# Texte brut
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "Connexion à la base de données perdue" \
+  "http://localhost:8000/notify/my-alerts?type=warning&tag=operations"
+
+# JSON
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"body": "Connexion à la base de données perdue"}' \
+  "http://localhost:8000/notify/my-alerts?type=warning&tag=operations"
+```
+
+Cela convient aux outils qui permettent de définir une URL, mais pas d'en-têtes ni la structure de la charge utile.
+
+</TabItem>
+<TabItem label="Combinaison">
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Apprise-Tag: operations" \
+  -H "X-Apprise-Type: warning" \
+  -d '{"body": "Connexion à la base de données perdue", "tag": "devops"}' \
+  "http://localhost:8000/notify/my-alerts?type=failure&title=PostgreSQL"
+```
+
+Le tag est `devops` (charge utile avant en-tête), le type est `warning` (en-tête avant chaîne de requête) et le titre est `PostgreSQL` (seule la chaîne de requête le définit).
+
+</TabItem>
+<TabItem label="Pièces jointes">
+
+```bash
+# Téléverser un fichier local
+curl -X POST \
+  -F "tag=devops" \
+  -F "body=Voir le journal joint" \
+  -F "attach=@/var/log/syslog" \
+  http://localhost:8000/notify/my-alerts
+
+# Une pièce jointe seule suffit ; le corps est facultatif
+curl -X POST \
+  -F "attach=@/path/to/snapshot.jpg" \
+  http://localhost:8000/notify/my-alerts
+```
+
+</TabItem>
+<TabItem label="Valeurs de substitution">
+
+```bash
+# JSON
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"tag": "alerts", "body": "Sauvegarde terminée", "template": {"api_key": "votre-cle-secrete"}}' \
+  http://localhost:8000/notify/my-alerts
+
+# Formulaire
+curl -X POST \
+  -F "tag=alerts" \
+  -F "body=Sauvegarde terminée" \
+  -F "template[api_key]=votre-cle-secrete" \
+  http://localhost:8000/notify/my-alerts
+
+# En-tête, avec n'importe quel Content-Type
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  -H "X-Apprise-Tag: alerts" \
+  -H "X-Apprise-Template: api_key=votre-cle-secrete" \
+  --data-raw "Sauvegarde terminée" \
+  http://localhost:8000/notify/my-alerts
+```
+
+Consultez [Fournir des valeurs de substitution](#fournir-des-valeurs-de-substitution).
+
+</TabItem>
+</Tabs>
+
+</TabItem>
+</Tabs>
 
 ## Formats de Réponse
 
@@ -125,7 +517,7 @@ laquelle le proxy attend une activité du flux. La valeur par défaut est de
   />
 </picture>
 
-Les notifications sans état sont idéales pour un usage de type « sidecar » lorsque vous ne voulez pas gérer de configuration persistante sur le serveur. Vous devez fournir le paramètre `urls` à chaque requête.
+Les notifications sans état sont idéales pour un usage de type « sidecar » lorsque vous ne voulez pas gérer de configuration persistante sur le serveur. Fournissez le paramètre `urls` avec chaque requête, ou définissez `APPRISE_STATELESS_URLS` sur le serveur pour l'utiliser lorsqu'il est omis.
 
 Lorsque l'authentification est activée, utilisez les identifiants administrateur ou envoyez des `urls` explicites avec les identifiants d'un utilisateur de configuration et l'en-tête `X-Apprise-Config-ID` correspondant. L'accès de cet utilisateur doit être `user` ; `locked`, `public` et `disabled` ne peuvent pas envoyer de notifications sans état. Pour rester compatible avec l'API Apprise v2, l'en-tête envoyé sans `urls` reste un envoi avec état via la configuration enregistrée.
 
@@ -251,6 +643,8 @@ curl -X POST -d '{"tag": "devops critical", "body": "..."}' ...
 curl -X POST -d '{"tag": "comment create,admin", "body": "..."}' ...
 ```
 
+Le tag peut aussi être envoyé dans l'en-tête `X-Apprise-Tag` ou dans la chaîne de requête `?tag=`. Consultez [Priorité des champs](#priorité-des-champs) pour savoir lequel l'emporte.
+
 ### Fournir des Valeurs de Substitution
 
 Si une configuration enregistrée utilise des marqueurs `${NOM}`, les URL qui en
@@ -290,6 +684,19 @@ curl -X POST \
   -F "template[api_key]=votre-cle-secrete" \
   http://localhost:8000/notify/my-alerts
 ```
+
+Pour toute autre requête, envoyez des paires `nom=valeur` encodées pour URL dans l'en-tête `X-Apprise-Template`. Encodez `&` et `=` dans une valeur en `%26` et `%3D` :
+
+```bash
+curl -X POST \
+  -H "Content-Type: text/plain" \
+  -H "X-Apprise-Tag: alerts" \
+  -H "X-Apprise-Template: api_key=votre-cle-secrete" \
+  --data-raw "Échec de la connexion à la base de données" \
+  http://localhost:8000/notify/my-alerts
+```
+
+L'en-tête n'est utilisé que si la charge utile ne contient aucune valeur `template`. Un en-tête mal formé renvoie le code HTTP `400`.
 
 Une valeur envoyée ainsi passe en premier. Si elle est vide ou ne contient que
 des espaces, Apprise utilise la valeur par défaut de la configuration, puis
