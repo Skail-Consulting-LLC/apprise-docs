@@ -58,6 +58,16 @@ How they ping depends on how the message is sent:
 - **Embeds** (`format=markdown`, or when `url=` or `thread=` is set): text inside an embed cannot ping, so Apprise copies the mentions it finds in your message onto a `👉` line that does.
 - **`ping=`**: always pings the mentions you list, in either mode, using that same `👉` line. Separate several with a comma, and write the `&` of a role as `%26` in the URL, for example `ping=<@123>,<@%26456>,@here`.
 
+### Emoji
+
+Discord turns any `:name:` it recognizes into an emoji, even in the middle of a word, so an address such as `2001:db8:100::1` would show 💯. You can choose how these are handled:
+
+- **`emojis=no`**: `:name:` shows exactly as you wrote it, which keeps addresses intact.
+- **`emojis=yes`**: names such as `:smile:` become emoji (😄).
+- **Neither set**: your message is sent as-is and Discord decides what becomes an emoji, unless whoever runs your Apprise setup has chosen a different default.
+
+Code (text between backticks), links, and Discord tokens such as `<:party:123>` or `<t:1700000000:R>` are never changed.
+
 ## Syntax
 
 Valid syntax is as follows:
@@ -266,6 +276,15 @@ Always ping `@here`, without writing it in the message:
 # Assuming our {WebhookToken} is JHMHI8qBe7bk2ZwO5U711o3dV_js
 apprise -vv -t "Heads Up" -b "Deployment finished" \
    "discord://4174216298/JHMHI8qBe7bk2ZwO5U711o3dV_js?ping=@here"
+```
+
+Turn emoji off so addresses such as `2001:db8:100::1` show exactly as written instead of turning `:100:` into 💯:
+
+```bash
+# Assuming our {WebhookID} is 4174216298
+# Assuming our {WebhookToken} is JHMHI8qBe7bk2ZwO5U711o3dV_js
+apprise -vv -t "Peer Down" -b "Lost contact with 2001:db8:100::1" \
+   "discord://4174216298/JHMHI8qBe7bk2ZwO5U711o3dV_js?emojis=no"
 ```
 
 Send multiple attachments in a single Discord message (default behaviour):

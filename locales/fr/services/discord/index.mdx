@@ -58,6 +58,16 @@ Leur effet dépend de la façon dont le message est envoyé :
 - **Embeds** (`format=markdown`, ou lorsque `url=` ou `thread=` est défini) : le texte d'un embed ne peut pas notifier, donc Apprise recopie les mentions trouvées dans votre message sur une ligne `👉` qui, elle, notifie.
 - **`ping=`** : notifie toujours les mentions que vous indiquez, dans les deux modes, au moyen de cette même ligne `👉`. Séparez-les par une virgule et, dans l'URL, écrivez le `&` d'un rôle sous la forme `%26`, par exemple `ping=<@123>,<@%26456>,@here`.
 
+### Émojis
+
+Discord transforme tout `:nom:` qu'il reconnaît en émoji, même au milieu d'un mot, si bien qu'une adresse comme `2001:db8:100::1` afficherait 💯. Vous pouvez choisir comment ils sont traités :
+
+- **`emojis=no`** : `:nom:` s'affiche exactement comme vous l'avez écrit, ce qui préserve les adresses.
+- **`emojis=yes`** : les noms comme `:smile:` deviennent des émojis (😄).
+- **Aucun des deux** : votre message est envoyé tel quel et Discord décide de ce qui devient un émoji, sauf si la personne qui gère votre installation d'Apprise a choisi un autre comportement par défaut.
+
+Le code (texte entre accents graves), les liens et les jetons Discord comme `<:party:123>` ou `<t:1700000000:R>` ne sont jamais modifiés.
+
 ## Syntaxe
 
 La syntaxe valide est la suivante :
@@ -266,6 +276,15 @@ Toujours notifier `@here`, sans l'écrire dans le message :
 # Supposons que notre {WebhookToken} soit JHMHI8qBe7bk2ZwO5U711o3dV_js
 apprise -vv -t "Attention" -b "Déploiement terminé" \
    "discord://4174216298/JHMHI8qBe7bk2ZwO5U711o3dV_js?ping=@here"
+```
+
+Désactiver les émojis pour qu'une adresse comme `2001:db8:100::1` s'affiche exactement comme écrite, au lieu de transformer `:100:` en 💯 :
+
+```bash
+# Supposons que notre {WebhookID} soit 4174216298
+# Supposons que notre {WebhookToken} soit JHMHI8qBe7bk2ZwO5U711o3dV_js
+apprise -vv -t "Pair injoignable" -b "Contact perdu avec 2001:db8:100::1" \
+   "discord://4174216298/JHMHI8qBe7bk2ZwO5U711o3dV_js?emojis=no"
 ```
 
 Envoyer plusieurs pièces jointes dans un seul message Discord (comportement par défaut) :
